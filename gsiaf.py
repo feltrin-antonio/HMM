@@ -8,10 +8,11 @@ class HMM: # 2 STATES
         self.PI = PI            # initial state distribution -> uniform
         self.data = O           #  observation sequence -> hp: gaussian distribution        
         self.O = (self.data - self.data.mean(axis=0)) / self.data.std(axis=0)      # normalized data 
-        self.params = params    # fit parameters of the PDF distribution: it is a matrix (number_of_states, 2)
-        self.mean = self.params[:, 0]; self.std = self.params[:, 1]
-        self._gaussian_vectorized = np.vectorize(self._gaussian)
-        self.epsilon = 0.01
+        self.params = params # fit parameters of the PDF distribution: it is a matrix (number_of_states, 2)
+        self.mean = (self.params[:,0] - self.data.mean(axis=0)) / self.data.std(axis=0) #data & params are normalized
+        self.std = self.params[:,1] / self.data.std(axis=0)
+        #self._gaussian_vectorized = np.vectorize(self._gaussian)
+        #self.epsilon = 0.01
         # self.B = np.zeros(shape=(self.number_of_states, self.O.size)) # observation probability matrix
         # for n in range(self.number_of_states):
         #     self.B[n] = self._gaussian_vectorized(self.c[n], self.mean[n], self.std[n], self.O)
@@ -42,7 +43,7 @@ class HMM: # 2 STATES
         b = np.zeros(shape=(self.O.size, self.number_of_states)) # in the future must be corrected to account for num_states > 2
         #b = np.array([ self._gaussian(self.mean[0],self.std[0],self.O) , self._gaussian(self.mean[1],self.std[1],self.O) ])
         b[0] = self._gaussian(self.mean, self.std, self.O[0]) # norm.cdf((self.O[0]+self.epsilon-self.mean)/self.std) - norm.cdf((self.O[0]-self.epsilon-self.mean)/self.std)
-
+        print('b[0]',b[0])
 #        print('bcshape', np.shape(b),'\n')
  
         forward_variable = np.zeros(shape=(self.O.size, self.number_of_states))
@@ -51,7 +52,7 @@ class HMM: # 2 STATES
         # 2. Recurrence step
         for t in range(self.O.size-1):
             b[t+1] = self._gaussian(self.mean, self.std, self.O[t+1]) #norm.cdf((self.O[t+1]+self.epsilon-self.mean)/self.std) - norm.cdf((self.O[t+1]-self.epsilon-self.mean)/self.std) 
-            forward_variable[t+1] = np.sum(forward_variable[t]*self.A)*b[t+1]
+            forward_variable[t+1] = np.sum((forward_variable[t]*self.A.T).T,axis=0)*b[t+1]
 
         # 3. Evaluation step:
         probability_O_Delta_forw = np.sum(forward_variable[-1]) # = total prob of getting observable O for x_1:t
@@ -67,8 +68,8 @@ class HMM: # 2 STATES
         
         # 2. Recurrence step
         for k in range(self.O.size-1, 0, -1):
-            par_sum = np.sum(self.A * b[k] * beta[k], axis=1)
-            beta[k-1] = par_sum.copy()
+            beta[k-1] = np.sum(self.A * b[k] * beta[k], axis=1)
+
                 
         # 3. Evaluation step:
         probability_O_Delta_back = np.sum(self.PI*b[0]*beta[0]) # = total prob of getting observable O for x_t+1:T
@@ -76,12 +77,12 @@ class HMM: # 2 STATES
             print(f"La probabilità P(O|Δ) = {probability_O_Delta_back}, ottenuta con il metodo forward-backward sulla backward-variable")
 
 
-        #self.alpha = np.nan_to_num(forward_variable.copy(), nan=1e-100)
-        #self.beta = np.nan_to_num(beta.copy(), nan=1e-100)
-        #self.b = np.nan_to_num(b.copy(), nan=1e-100)
-        self.alpha = forward_variable.copy()
-        self.beta = beta.copy()
-        self.b = b.copy()
+        self.alpha = np.nan_to_num(forward_variable.copy(), nan=1e-100)
+        self.beta = np.nan_to_num(beta.copy(), nan=1e-100)
+        self.b = np.nan_to_num(b.copy(), nan=1e-100)
+        #self.alpha = forward_variable.copy()
+        #self.beta = beta.copy()
+        #self.b = b.copy()
 
         return self.alpha, self.beta, self.b
 
@@ -100,9 +101,9 @@ class HMM: # 2 STATES
         for t in range(self.O.size-1):
             var = np.zeros(shape=self.number_of_states)
             for j in range(self.number_of_states):
-                var[j] = max(delta[t]*self.A[:][j])
+                var[j] = max(delta[t]*self.A[:,j])
             delta[t+1] = var*self.b[t+1] #self._gaussian_vectorized(self.mean, self.std, self.O[t+1])
-            q[t+1] = np.argmax(delta[t]*self.A, axis=0) #? the state that maximizes delta is stored in the backtracking state
+            q[t+1] = np.argmax(delta[t]*self.A, axis=1) #? the state that maximizes delta is stored in the backtracking state
             #w/ axis=0, q[t+1] stores the transition prob(*delta[t]) of the most probable state 
             #~contrary of the escape probability
             # q[t+1] is the most probable state at t+1 given delta[t], A 
@@ -113,7 +114,7 @@ class HMM: # 2 STATES
         for k in range(self.O.size-2, -1, -1):
             X[k] = q[k+1][X[k+1]]
         self.X = X.copy()
-        self.delta = delta.copy()
+        #self.delta = delta.copy()
         return self.X
 
     
@@ -124,8 +125,8 @@ class HMM: # 2 STATES
     
         # E-step:
         xi = np.zeros(shape=(self.O.size, self.number_of_states, self.number_of_states))    # segment posterior
-        for t in range(0, self.O.size-1):
-            xi[t] = self.alpha[t]*self.A*self.b[t+1]*self.beta[t+1]
+        for t in range(0, self.O.size-1):#?
+            xi[t] = (self.alpha[t]*self.A.T).T*self.b[t+1]*self.beta[t+1]
             xi[t] /= np.sum(xi[t])
 
         gamma = np.zeros(shape=(self.O.size, self.number_of_states))
@@ -136,6 +137,8 @@ class HMM: # 2 STATES
         # M-step:  
         # New transition probability matrix A 
         new_matrix = np.sum(xi, axis=0)/np.sum(xi, axis=(0,2)) #?
+        #rt new_matrix = np.sum(xi[1:self.O.size], axis=0)/np.sum(xi[1:self.O.size], axis=(2,0))
+
         self.A = new_matrix.copy()
 
         # New initial state distribution π
@@ -148,7 +151,8 @@ class HMM: # 2 STATES
         new_std = np.zeros_like(self.std)
         for n in range(self.number_of_states):
             new_mean[n] = np.sum(gamma[:,n]*self.O)/np.sum(gamma[:, n]) # out product?
-            new_std[n] = np.sqrt(np.sum(gamma[:,n]* np.outer((self.O-new_mean[n]),(self.O-new_mean[n])) ) /np.sum(gamma[:, n]))
+            new_std[n] = np.sqrt(np.sum(gamma[:,n]*(self.O-new_mean[n])**2)/np.sum(gamma[:, n]))
+            #new_std[n] = np.sqrt(np.sum(gamma[:,n]* np.outer((self.O-new_mean[n]),(self.O-new_mean[n])) ) /np.sum(gamma[:, n]))
         self.mean, self.std = new_mean.copy(), new_std.copy()
 
         return self.A, self.PI, self.mean, self.std
@@ -161,6 +165,7 @@ class HMM: # 2 STATES
             
             self.evaluation_problem(print_out=False)
             self.learning_problem()
+            print('params @ way',way,' are ',self.params,'\n')
 
             way += 1
             my_variable = way/MAX_ITERATION*100
@@ -213,9 +218,9 @@ class HMM: # 2 STATES
         
         return bic
     
-    #def LSE(self): # to be applied to alpha, beta 
-    #    #std way: alpha(t) = sum alpha *a* b
-    #    bepha_t = y
-    #    for j in range(self.number_of_states):
-    #        y = []
-    #    return np.exp(bepha_t)
+    def LSE(self): # to be applied to alpha, beta 
+        #std way: alpha(t) = sum alpha *a* b
+        bepha_t = y
+        for j in range(self.number_of_states):
+            y = []
+        return np.exp(bepha_t)
