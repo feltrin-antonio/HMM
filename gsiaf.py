@@ -218,9 +218,11 @@ class HMM: # 2 STATES
         
         return bic
     
-    def LSE(self): # to be applied to alpha, beta 
-        #std way: alpha(t) = sum alpha *a* b
-        bepha_t = y
+    def LSE(self, a, b, previous_alpha): # to be applied to alpha, beta
+        bepha = np.zeros_like(previous_alpha)
         for j in range(self.number_of_states):
             y = []
-        return np.exp(bepha_t)
+            for i in range(self.number_of_states):
+                y.append(np.log(previous_alpha[i]) + np.log(a[i,j]))
+            bepha[j] = np.max(y) + np.log(b[j])
+        return np.exp(bepha)
